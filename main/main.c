@@ -16,12 +16,29 @@
 #define TAG "SEN5X_MAIN"
 #define SENSOR_POLL_DELAY_MS 10000  // 10 seconds
 
-#define WIFI_SSID "your ssid"
-#define WIFI_PASS "your password"
+// WiFi network credentials structure
+typedef struct {
+    const char *ssid;
+    const char *password;
+} wifi_network_t;
+
+// List of WiFi networks to try (in order of priority)
+static const wifi_network_t wifi_networks[] = {
+    { "Ashutosh", "ashu1103" },
+    { "oplus_co_apufrn", "12345678" },
+    { "Aaryan", "200807As" },
+    { "Shlok's IPhone", "shlok242418" }
+};
+#define WIFI_NETWORK_COUNT (sizeof(wifi_networks) / sizeof(wifi_networks[0]))
 
 #define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT      BIT1
+#define WIFI_CONNECT_TIMEOUT_MS 10000  // 10 seconds timeout per network
+
 static EventGroupHandle_t wifi_event_group;
 static esp_mqtt_client_handle_t mqtt_client = NULL;
+static int current_network_index = 0;
+static bool wifi_connected = false;
 
 typedef struct {
     float conc_lo;
@@ -91,34 +108,110 @@ static void mqtt_event_handler(void *args, esp_event_base_t base, int32_t id, vo
 // Wi-Fi event handler
 static void wifi_event_handler(void* arg, esp_event_base_t eb, int32_t id, void* data) {
     if (eb == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        // Don't auto-connect here, we'll handle it in wifi_try_connect
     } else if (eb == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGW(TAG, "Wi-Fi disconnected, reconnecting...");
-        esp_wifi_connect();
+        if (wifi_connected) {
+            // Already connected before, try to reconnect to the same network
+            ESP_LOGW(TAG, "Wi-Fi disconnected, reconnecting to %s...", wifi_networks[current_network_index].ssid);
+            esp_wifi_connect();
+        } else {
+            // Connection attempt failed during initial connection
+            ESP_LOGW(TAG, "Failed to connect to %s", wifi_networks[current_network_index].ssid);
+            xEventGroupSetBits(wifi_event_group, WIFI_FAIL_BIT);
+        }
     } else if (eb == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* e = data;
-        ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&e->ip_info.ip));
+        ESP_LOGI(TAG, "Connected to %s - Got IP: " IPSTR, 
+                 wifi_networks[current_network_index].ssid, IP2STR(&e->ip_info.ip));
+        wifi_connected = true;
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
 
-// Initialize Wi-Fi
+// Try to connect to a specific WiFi network
+static bool wifi_try_connect(int network_index) {
+    current_network_index = network_index;
+    wifi_connected = false;
+    
+    const wifi_network_t *network = &wifi_networks[network_index];
+    ESP_LOGI(TAG, "Attempting to connect to WiFi network %d/%d: %s", 
+             network_index + 1, WIFI_NETWORK_COUNT, network->ssid);
+    
+    // Configure WiFi for this network
+    wifi_config_t wcfg = {
+        .sta = {
+            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
+        }
+    };
+    strncpy((char*)wcfg.sta.ssid, network->ssid, sizeof(wcfg.sta.ssid) - 1);
+    strncpy((char*)wcfg.sta.password, network->password, sizeof(wcfg.sta.password) - 1);
+    
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wcfg));
+    
+    // Clear event bits before connecting
+    xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+    
+    // Start connection attempt
+    esp_wifi_connect();
+    
+    // Wait for connection result with timeout
+    EventBits_t bits = xEventGroupWaitBits(
+        wifi_event_group,
+        WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+        pdFALSE,
+        pdFALSE,
+        pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS)
+    );
+    
+    if (bits & WIFI_CONNECTED_BIT) {
+        ESP_LOGI(TAG, "Successfully connected to %s", network->ssid);
+        return true;
+    }
+    
+    // Connection failed or timed out
+    esp_wifi_disconnect();
+    ESP_LOGW(TAG, "Connection to %s timed out or failed", network->ssid);
+    return false;
+}
+
+// Initialize Wi-Fi with multi-network support
 void wifi_init(void) {
     wifi_event_group = xEventGroupCreate();
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
+    
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL));
-    wifi_config_t wcfg = { .sta = {.ssid = WIFI_SSID, .password = WIFI_PASS, .threshold.authmode = WIFI_AUTH_WPA2_PSK } };
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wcfg));
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGI(TAG, "Wi-Fi started, waiting for IP...");
-    xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+    
+    ESP_LOGI(TAG, "Wi-Fi initialized, trying %d networks...", WIFI_NETWORK_COUNT);
+    
+    // Try each network in order until one connects
+    for (int i = 0; i < WIFI_NETWORK_COUNT; i++) {
+        if (wifi_try_connect(i)) {
+            return;  // Successfully connected, exit
+        }
+    }
+    
+    // All networks failed
+    ESP_LOGE(TAG, "Failed to connect to any WiFi network!");
+    ESP_LOGI(TAG, "Retrying from the first network...");
+    
+    // Keep trying indefinitely
+    while (1) {
+        for (int i = 0; i < WIFI_NETWORK_COUNT; i++) {
+            if (wifi_try_connect(i)) {
+                return;  // Successfully connected, exit
+            }
+        }
+        ESP_LOGW(TAG, "All networks failed, waiting 5 seconds before retry...");
+        vTaskDelay(pdMS_TO_TICKS(5000));
+    }
 }
 
 // Initialize MQTT
