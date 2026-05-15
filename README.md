@@ -1,50 +1,87 @@
-# ESP32 AQI Monitor with SEN55 Sensor
+# 🌬️ ESP32 AQI Monitor with Sensirion SEN55
 
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | -------- | -------- | -------- | -------- |
+[![Supported Targets](https://img.shields.io/badge/Supported%20Targets-ESP32%2C%20ESP32--C%2C%20ESP32--S-blue)](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/hw-reference/index.html)
+[![Framework](https://img.shields.io/badge/Framework-ESP--IDF%20%2F%20Arduino-orange)](https://github.com/espressif/esp-idf)
 
-An ESP-IDF project that reads air quality data from a **Sensirion SEN55** sensor and publishes real-time AQI measurements via **MQTT**.
+An advanced Air Quality Monitoring system powered by the **ESP32** and **Sensirion SEN55** sensor. This project provides real-time tracking of various environmental parameters and calculates the **Environmental Protection Agency (EPA) Air Quality Index (AQI)**.
 
-## Features
+---
 
-- **Multi-parameter sensing**: PM1.0, PM2.5, PM4.0, PM10, Temperature, Humidity, VOC Index, and NOx Index
-- **EPA AQI Calculation**: Calculates Air Quality Index using official EPA breakpoints for PM2.5, PM10, and NOx
-- **MQTT Publishing**: Sends sensor data as JSON payloads to a configurable MQTT broker
-- **Wi-Fi Connectivity**: Auto-reconnects on disconnection
-- **I2C Communication**: Uses Sensirion's I2C driver for reliable sensor communication
 
-## Hardware Requirements
+## ✨ Features
 
-- ESP32 development board (or compatible variant)
-- Sensirion SEN55 environmental sensor module
-- I2C wiring between ESP32 and SEN55:
-  - `SDA` → GPIO (default varies by board)
-  - `SCL` → GPIO (default varies by board)
-  - `VCC` → 3.3V or 5V (check SEN55 specs)
-  - `GND` → GND
+- **🚀 Multi-parameter Sensing**: 
+  - PM1.0, PM2.5, PM4.0, PM10 (Particulate Matter)
+  - Temperature & Relative Humidity
+  - VOC Index (Volatile Organic Compounds)
+  - NOx Index (Nitrogen Oxides)
+- **📊 Intelligent AQI Calculation**: Implements official EPA breakpoints for PM2.5, PM10, and NOx.
+- **🌐 Real-time Connectivity**: 
+  - MQTT Publishing via HiveMQ Broker.
+  - Seamless Wi-Fi integration with auto-reconnect logic.
+- **🛠️ Dual Framework Support**: Includes both **ESP-IDF** (v5.x) and **Arduino** implementations.
+- **🔌 Industrial Grade Communication**: Uses Sensirion's optimized I2C drivers for high reliability.
 
-## Configuration
+---
 
-Before building, update the following in `main/main.c`:
+## 🔌 Hardware Requirements
 
+| Component | Description |
+| :--- | :--- |
+| **ESP32 Dev Board** | ESP32-WROOM, ESP32-S3, or ESP32-C3 |
+| **Sensirion SEN55** | Environmental Sensor Node |
+| **Wiring** | I2C (SDA/SCL), VCC (5V recommended for SEN55), GND |
+
+### Wiring Diagram
+- `SDA` → GPIO 21 (Default)
+- `SCL` → GPIO 22 (Default)
+- `VCC` → 5V (Note: SEN55 requires 5V for the fan, logic is 3.3V compatible)
+- `GND` → GND
+
+### 📸 Hardware Implementation
+Visual overview of the physical sensor integration and circuit setup.
+
+| **Top View** | **Side View** |
+|:---:|:---:|
+| ![Hardware Top](images/img1.jpeg) | ![Hardware Side](images/img2.jpeg) |
+
+| **Assembly** | **Connection** | **Final Setup** |
+|:---:|:---:|:---:|
+| ![Assembly](images/img3.jpeg) | ![Connection](images/img4.jpeg) | ![Final Setup](images/img5.jpeg) |
+
+---
+
+## ⚙️ Software Configuration
+
+### 1. ESP-IDF (Recommended)
+Located in the `main/` directory.
+
+Update your credentials in `main/main.c`:
 ```c
-#define WIFI_SSID "your ssid"      // Your Wi-Fi network name
-#define WIFI_PASS "your password"  // Your Wi-Fi password
+#define WIFI_SSID     "Your_SSID"
+#define WIFI_PASSWORD "Your_Password"
 ```
 
-For MQTT, update the broker URI and topic:
-
-```c
-// In mqtt_init():
-.broker.address.uri = "mqtt://broker.hivemq.com:1883"
-
-// In app_main():
-esp_mqtt_client_publish(mqtt_client, "your topic", payload, 0, 1, 0);
+**Build & Flash:**
+```bash
+idf.py set-target esp32
+idf.py build
+idf.py -p [PORT] flash monitor
 ```
 
-## MQTT Data Format
+### 2. Arduino IDE
+Located in `aqi-sen55-ino/aqi-sen55/`.
 
-The sensor data is published as a JSON payload:
+**Dependencies:**
+- `Sensirion I2C SEN5X` Library
+- `PubSubClient` Library
+- `WiFi` Library
+
+---
+
+## 📡 MQTT Data Format
+
+Data is published as a JSON payload to the configured topic:
 
 ```json
 {
@@ -60,60 +97,53 @@ The sensor data is published as a JSON payload:
 }
 ```
 
-## Building and Flashing
+---
 
-1. **Set up ESP-IDF environment** (v5.x recommended):
+## 📈 AQI Reference Table
 
-   ```bash
-   . ~/esp/esp-idf/export.sh
-   ```
+The project calculates AQI based on the following EPA standards:
 
-2. **Configure the project**:
+| AQI Category | Range | PM2.5 (µg/m³) | PM10 (µg/m³) |
+| :--- | :--- | :--- | :--- |
+| **Good** | 0-50 | 0.0-12.0 | 0-54 |
+| **Moderate** | 51-100 | 12.1-35.4 | 55-154 |
+| **Unhealthy (Sens.)** | 101-150 | 35.5-55.4 | 155-254 |
+| **Unhealthy** | 151-200 | 55.5-150.4 | 255-354 |
+| **Very Unhealthy** | 201-300 | 150.5-250.4 | 355-424 |
+| **Hazardous** | 301-500 | 250.5-500.4 | 425-604 |
 
-   ```bash
-   idf.py menuconfig
-   ```
+---
 
-3. **Build the project**:
+## 📁 Project Structure
 
-   ```bash
-   idf.py build
-   ```
-
-4. **Flash to ESP32**:
-   ```bash
-   idf.py -p /dev/ttyUSB0 flash monitor
-   ```
-
-## Project Structure
-
-```
+```text
 ├── CMakeLists.txt              Project-level CMake configuration
-├── main/
-│   ├── CMakeLists.txt          Main component CMake configuration
+├── main/                       ESP-IDF Source Code
 │   ├── main.c                  Application entry point & logic
 │   ├── sen5x_i2c.c/.h          SEN5x sensor driver
-│   ├── sensirion_common.c/.h   Common Sensirion utilities
-│   ├── sensirion_config.h      Sensirion configuration
-│   ├── sensirion_i2c.c/.h      I2C protocol implementation
 │   └── sensirion_i2c_hal.c/.h  I2C HAL for ESP-IDF
-├── sdkconfig                   ESP-IDF SDK configuration
-└── README.md                   This file
+├── aqi-sen55-ino/              Arduino Source Code
+│   └── aqi-sen55/
+│       └── aqi-sen55.ino       Arduino Sketch
+├── pcb-designs/                Hardware design files & schematics
+└── README.md                   Project documentation
 ```
 
-## AQI Breakpoints
+---
 
-The project uses EPA standard breakpoints:
+## 👥 Authors
 
-| AQI Category      | AQI Range | PM2.5 (µg/m³) | PM10 (µg/m³) |
-| ----------------- | --------- | ------------- | ------------ |
-| Good              | 0-50      | 0.0-12.0      | 0-54         |
-| Moderate          | 51-100    | 12.1-35.4     | 55-154       |
-| Unhealthy (Sens.) | 101-150   | 35.5-55.4     | 155-254      |
-| Unhealthy         | 151-200   | 55.5-150.4    | 255-354      |
-| Very Unhealthy    | 201-300   | 150.5-250.4   | 355-424      |
-| Hazardous         | 301-500   | 250.5-500.4   | 425-604      |
+- **Anurag Doshi** (*ChipIOT Embedded System*)
+- **Ashutosh Swamy**
+- **Shlok Parge**
+- **Aaryan Sharma**
+- **Naman Vangani**
 
-## License
 
-This project uses Sensirion's open-source I2C drivers. Please refer to individual source files for licensing information.
+---
+
+## 📜 Ownership
+
+This project is owned by **ChipIOT**. Sensirion drivers are subject to their own open-source licensing.
+
+
